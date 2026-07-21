@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import operator as op
 import tkinter as tk
 from tkinter import ttk
@@ -24,6 +25,24 @@ class SafeEvaluator(ast.NodeVisitor):
         ast.USub: op.neg,
     }
 
+    CONSTANTS = {
+        "pi": math.pi,
+        "π": math.pi,
+        "e": math.e,
+    }
+
+    # Trig functions take degrees, matching typical calculator behavior.
+    FUNCTIONS = {
+        "sqrt": math.sqrt,
+        "sin": lambda x: math.sin(math.radians(x)),
+        "cos": lambda x: math.cos(math.radians(x)),
+        "tan": lambda x: math.tan(math.radians(x)),
+        "log": math.log10,
+        "ln": math.log,
+        "exp": math.exp,
+        "fact": lambda x: math.factorial(int(x)),
+    }
+
     def visit_Expression(self, node: ast.Expression):
         return self.visit(node.body)
 
@@ -42,6 +61,20 @@ class SafeEvaluator(ast.NodeVisitor):
             raise ValueError("Unsupported operator")
         return operator(operand)
 
+    def visit_Call(self, node: ast.Call):
+        if not isinstance(node.func, ast.Name) or node.keywords:
+            raise ValueError("Unsupported function call")
+        func = self.FUNCTIONS.get(node.func.id)
+        if func is None:
+            raise ValueError(f"Unsupported function: {node.func.id}")
+        args = [self.visit(arg) for arg in node.args]
+        return func(*args)
+
+    def visit_Name(self, node: ast.Name):
+        if node.id in self.CONSTANTS:
+            return self.CONSTANTS[node.id]
+        raise ValueError(f"Unsupported name: {node.id}")
+
     def visit_Constant(self, node: ast.Constant):
         if isinstance(node.value, (int, float)):
             return node.value
@@ -55,7 +88,8 @@ class SafeEvaluator(ast.NodeVisitor):
 
 
 def safe_eval(expression: str):
-    tree = ast.parse(expression, mode="eval")
+    # "^" reads as power here (not XOR) to match calculator conventions.
+    tree = ast.parse(expression.replace("^", "**"), mode="eval")
     return SafeEvaluator().visit(tree)
 
 
@@ -138,6 +172,32 @@ class CalculatorApp(tk.Tk):
         keypad.columnconfigure(1, weight=1)
         keypad.columnconfigure(2, weight=1)
         keypad.columnconfigure(3, weight=1)
+
+        sci_keypad = ttk.Frame(self)
+        sci_keypad.grid(row=2, column=0, pady=(8, 0))
+
+        sci_buttons = [
+            ("sin", lambda: self.append("sin(")),
+            ("cos", lambda: self.append("cos(")),
+            ("tan", lambda: self.append("tan(")),
+            ("√", lambda: self.append("sqrt(")),
+            ("log", lambda: self.append("log(")),
+            ("ln", lambda: self.append("ln(")),
+            ("exp", lambda: self.append("exp(")),
+            ("x^y", lambda: self.append("^")),
+            ("x²", lambda: self.append("^2")),
+            ("n!", lambda: self.append("fact(")),
+            ("π", lambda: self.append("π")),
+            ("e", lambda: self.append("e")),
+        ]
+
+        for index, (text, command) in enumerate(sci_buttons):
+            row, col = divmod(index, 4)
+            btn = ttk.Button(sci_keypad, text=text, command=command, width=6)
+            btn.grid(row=row, column=col, sticky="nsew", padx=3, pady=3)
+
+        for col in range(4):
+            sci_keypad.columnconfigure(col, weight=1)
 
     def _bind_keys(self):
         self.bind_all("<Return>", lambda _: self.calculate())
